@@ -561,5 +561,157 @@ Jupyter notebooks will open inline. We can make sure we are using the right pyth
 
 \section{Appendix}
 Here is a link to my github respository:
-\href{https://github.com/jorgenin/2.077-FEniCSx-Finite-Elasticity}{GitHub FEniCSX Finite Plasticity}
+\href{https://github.com/jorgenin/2.077-Fenicsx-Plasticity}{GitHub FEniCSX Finite Plasticity}
+
+
+\section{Creating a new Docker Image}
+
+From time to time you may want to create you're own custom docker image. For example if there is a new update to FEniCSx or if you want specific dependencies automatically intstalled in an image.
+This section will be covering how to do this, and then uploading that image to DockerHUB, to share the image with others.
+
+\subsection{Docker Files}
+Images are normally defined by docker files. These are essentially a list of commands that docker will run to create the image.
+You can find the docker file that was used in this tutorial \href{https://github.com/jorgenin/2.077-Fenicsx-Plasticity/blob/main/docker/dockerfile}{here}.
+
+\begin{lstlisting}[language=bash]
+FROM dolfinx/dolfinx:nightly
+ARG TARGETARCH
+SHELL ["/bin/bash", "-c"]
+LABEL maintainer="Jorge Nin <jorgenin@Mit.edu>"
+
+# Install dependencies
+RUN apt-get update && apt-get clean && apt-get install -y \
+    xvfb vim ffmpeg
+
+
+# Install python dependencies
+RUN pip3 install --upgrade pip
+
+RUN if [[ ${TARGETARCH} =~ "arm64" ]]; then \ 
+    pip3 install "https://github.com/finsberg/vtk-aarch64/releases/download/vtk-9.2.6-cp310/vtk-9.2.6.dev0-cp310-cp310-linux_aarch64.whl";\
+    fi
+
+
+RUN pip3 install "pyvista[all,trame]" jupyterlab ipython ipywidgets
+
+WORKDIR /home/project
+\end{lstlisting}
+\clist{FROM} declares what the base image we will be using is.
+\clist{FROM dolfinx/dolfinx:nightly} will create the image from the nightly version of FEniCSx. We could also use \clist{FROM dolfinx/dolfinx:latest} to get the latest stable version of FEniCSx.
+\clist{ARG TARGETARCH} is a command that stores the target architecture (eithr amd64 or arm64) into a variable we can access.
+
+\clist{RUN} just runs a command in the "terminal" of the image.
+\clist{WORKDIR} sets the default working directory of the image.
+
+\subsection{Building the Image}
+Once you've modified the docker file to your liking you can build the image by running the following command:
+\begin{lstlisting}[language=bash]
+  > docker build -t "image name" .
+\end{lstlisting}
+Here \clist{"image name"} will be the name of the image you create.
+
+You can than use this image as normal to create a container and use it for development.
+
+\subsubsection{Building an image for different architectures}
+By default the image you build is only for the architecture you are currently running on.
+
+However we may want to build one image for arm64 and another for amd64 for exmaple so that both intel and M1 macs and use the image.
+Doing this is a bit more invovled but not too difficult.
+
+First we must create a custom builder that can cross compile the images.
+We can do this by running the following command:
+\begin{lstlisting}[language=bash]
+  > docker buildx create --name mybuilder --bootstrap --use
+\end{lstlisting}
+
+We can then run the \clist{docker build ls} command to see the builders.
+It should output something like this:
+\begin{lstlisting}
+  docker buildx ls
+NAME/NODE     DRIVER/ENDPOINT              STATUS   BUILDKIT PLATFORMS
+mybuilder *   docker-container
+  mybuilder0  unix:///var/run/docker.sock  running  v0.12.1  linux/amd64, linux/amd64/v2, linux/amd64/v3, linux/arm64, linux/riscv64, linux/ppc64le, linux/s390x, linux/386, linux/mips64le, linux/mips64, linux/arm/v7, linux/arm/v6
+default       docker
+  default     default                      running  v0.12.3  linux/amd64, linux/arm64, linux/arm/v7, linux/arm/v6
+\end{lstlisting}
+
+We can then build the multiple images like so:
+
+\begin {lstlisting}
+docker buildx build --platform linux/amd64,linux/arm64 -t <username>/<image>:latest --push .
+\end{lstlisting}
+
+This will build the image for both amd64 and arm64 and then push it to docker hub.
+We will talk more about pushing to docker hub in the next section.
+
+\subsection{Pushing to Docker Hub}
+Once we've created the image, and tested we may want to share it with others.
+
+We can do this by pushing it to docker hub.
+\href{https://hub.docker.com/repository/docker/jorgenin/dolfinx-2.077/general}{Here is the docker hub for the image we've used in this example.}
+Opening the page you can see the different tags that we have availble.
+
+As a part of pushing to dockerhub you must create an account.
+
+After you've created an account and logged in through the docker dashboard, you may use the docker push command.
+To do so first we must tag the images.
+Normally images are named according to the following format:
+
+\clist{<username>/<imagename>:<tag>}
+The tag can be the verison of the image, or any other tag that describes the difference.
+
+We can tag our image in two ways, during building or aftewards.
+
+\subsubsection{Tagging during building}
+During building we can tag our image with the \clist{-t} flag. We can actually tag the same image with multiple flags.
+
+For example we can run the following command:
+\begin{lstlisting}
+  docker build  -t jorgenin/dolfinx-2.077:v0.8 -t jorgenin/dolfinx-2.077:latest -t jorgenin/dolfinx-2.077:v0.8.1 -t jorgenin/dolfinx-2.077:nightly .
+\end{lstlisting}
+
+And we will actually tag the image with \clist{v0.8}, \clist{latest}, \clist{v0.8.1}, and \clist{nightly}.
+
+\subsubsection{Tagging after building}
+We can tag the image after building by running:
+\begin{lstlisting}
+  docker tag <image id> <username>/<imagename>:<tag>
+\end{lstlisting}
+
+We can do this multiple times to add multiple tags for example:
+\begin{lstlisting}
+  docker tag dolfinx jorgenin/dolfinx-2.077:0.8
+  docker tag dolfinx jorgenin/dolfinx-2.077:latest
+  docker tag dolfinx jorgenin/dolfinx-2.077:nightly
+  docker tag dolfinx jorgenin/dolfinx-2.077:0.8.1
+\end{lstlisting}
+
+\subsubsection{Pushing to Docker Hub}
+Once we've tagged the image we can push the images to docker hub.
+We can push as single image by running
+\begin{lstlisting}
+  docker push <username>/<imagename>:<tag>
+\end{lstlisting}
+
+Or we can push all of the tags by running:
+\begin{lstlisting}
+  docker push -a <username>/<imagename>
+\end{lstlisting}
+
+We could have also pushed during building by running:
+\begin{lstlisting}
+  docker build -t <username>/<imagename>:<tag> --push .
+\end{lstlisting}
+
+\subsection{Example of full command}
+
+Here is an example of the full command that was used for building the \clist{jorgenin/dolfinx-2.077} images.
+
+\begin{lstlisting}
+  docker buildx build --platform linux/amd64,linux/arm64 -t jorgenin/dolfinx-2.077:v0.8 -t jorgenin/dolfinx-2.077:latest -t jorgenin/dolfinx-2.077:v0.8.1 -t jorgenin/dolfinx-2.077:nightly . --push
+\end{lstlisting}
+
+This command builds multiple tags of the image for both amd64 and arm64 and then pushes them to dockerhub.
+
+
 \end{document}
